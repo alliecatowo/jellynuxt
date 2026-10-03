@@ -7,6 +7,9 @@
  *   GET /api/jellyfin/Users/Libraries
  *   → GET {JELLYFIN_URL}/Users/{userId}/Views  (with X-Emby-Token header)
  */
+const IMAGE_PATH = /^Items\/[0-9a-fA-F-]{32,36}\/Images\/(Primary|Backdrop|Thumb|Logo)$/
+const IMAGE_QUERY_KEYS = new Set(['maxWidth', 'maxHeight', 'quality', 'tag'])
+
 export default defineEventHandler(async (event) => {
   const config = useRuntimeConfig()
   const jellyfinUrl = config.jellyfinUrl || 'http://localhost:8096'
@@ -21,6 +24,16 @@ export default defineEventHandler(async (event) => {
 
   // Build the target path from the wildcard segment
   const path = event.context.params?.path ?? ''
+
+  // Only GET, and only the paths the UI needs. The API key is admin-level, so an
+  // open pass-through would let anyone who can reach this app read the whole server.
+  if (event.method !== 'GET') {
+    throw createError({ statusCode: 405, statusMessage: 'Method not allowed' })
+  }
+  const isConvenience = path === 'Users/Libraries' || path === 'Users/Movies'
+  if (!isConvenience && !IMAGE_PATH.test(path)) {
+    throw createError({ statusCode: 404, statusMessage: 'Not found' })
+  }
 
   // Handle convenience routes that need user ID injection
   let targetPath: string
@@ -39,7 +52,9 @@ export default defineEventHandler(async (event) => {
     // Preserve query string
     const query = getQuery(event)
     const queryString = new URLSearchParams(
-      Object.entries(query).map(([k, v]) => [k, String(v)])
+      Object.entries(query)
+        .filter(([k]) => IMAGE_QUERY_KEYS.has(k))
+        .map(([k, v]) => [k, String(v)])
     ).toString()
     targetUrl = `${jellyfinUrl}/${targetPath}${queryString ? `?${queryString}` : ''}`
   }
